@@ -14,7 +14,10 @@ import argparse
 import time
 from torch.utils.data import DataLoader
 import argoverse.evaluation.eval_forecasting as eval
-
+from argoverse.map_representation.map_api import ArgoverseMap
+from argoverse.utils.mpl_plotting_utils import draw_lane_polygons
+am = ArgoverseMap()
+import random
 
 class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
     def __init__(self):
@@ -25,6 +28,7 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         self.loadData.clicked.connect(self.data_load)
         self.next_idx.clicked.connect(self.next)
         self.idx = 0
+        self.fov = 25
 
     def next(self):
         self.cur_data = next(iter(self.data_loader))
@@ -34,7 +38,7 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         self.update_data()
 
     def update_data(self):
-        print('update')
+        self.pred_plot.canvas.ax.clear()
         self.map_data.setText(self.cur_data['city'][0])
         self.num_of_vehicles_data.setText(str(self.cur_data['feats'][0].shape[0]))
         self.SceneInfo_data.setText('None')
@@ -47,8 +51,17 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         self.fde6_data.setText(str(fde6)[:5])
         self.visualization()
 
-    # def visualization(self):
-
+    def visualization(self):
+        ego_cur_pos = self.cur_data['gt_preds'][0][0,0,:]
+        xmin = ego_cur_pos[0] - self.fov
+        xmax = ego_cur_pos[0] + self.fov
+        ymin = ego_cur_pos[1] - self.fov
+        ymax = ego_cur_pos[1] + self.fov
+        city_name = self.cur_data['city'][0]
+        local_lane_polygons = am.find_local_lane_polygons([xmin, xmax, ymin, ymax], city_name)
+        draw_lane_polygons(self.pred_plot.canvas.ax, local_lane_polygons, color='k')
+        self.pred_plot.canvas.draw()
+        self.pred_plot.canvas.ax.axis('equal')
 
     def get_eval_data(self, pred_out):
         gt_trajectory = self.cur_data['gt_preds'][0][1, :, :]
@@ -148,14 +161,11 @@ main_dialog.show()
 app.exec_()
 
 
-#
+
 # root_dir = '/home/jhs/Desktop/SRFNet/LaneGCN/dataset/val/data/'
 #
 # from argoverse.map_representation.map_api import ArgoverseMap
-# from demo_usage.visualize_30hz_benchmark_data_on_map import DatasetOnMapVisualizer
 # am = ArgoverseMap()
-# from argoverse.data_loading.argoverse_forecasting_loader import ArgoverseForecastingLoader
-# afl = ArgoverseForecastingLoader(root_dir)
 # from argoverse.utils.mpl_plotting_utils import draw_lane_polygons
 #
 # import matplotlib.pyplot as plt
@@ -177,5 +187,4 @@ app.exec_()
 # local_das = am.find_local_driveable_areas([xmin, xmax, ymin, ymax], city_name)
 #
 # domv = DatasetOnMapVisualizer(dataset_dir, experiment_prefix, use_existing_files=use_existing_files, log_id=argoverse_data.current_log)
-#
-# draw_lane_polygons(ax, local_lane_polygons, color='r')
+
