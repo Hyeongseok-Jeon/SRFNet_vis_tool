@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
@@ -45,6 +45,10 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         self.fde1_data.setText(str(fde1)[:5])
         self.ade6_data.setText(str(ade6)[:5])
         self.fde6_data.setText(str(fde6)[:5])
+        self.visualization()
+
+    # def visualization(self):
+
 
     def get_eval_data(self, pred_out):
         gt_trajectory = self.cur_data['gt_preds'][0][1, :, :]
@@ -142,31 +146,36 @@ app = QApplication(sys.argv)
 main_dialog = MainDialog()
 main_dialog.show()
 app.exec_()
+
+
 #
-# _, _, _, pre_model, _, _, _, _ = get_model(args)
-# pre_trained_weight = torch.load(os.path.join(root_path, "LaneGCN/pre_trained") + '/36.000.ckpt')
-# pretrained_dict = pre_trained_weight['state_dict']
-# new_model_dict = pre_model.state_dict()
-# pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in new_model_dict}
-# new_model_dict.update(pretrained_dict)
-# pre_model.load_state_dict(new_model_dict)
-# os.makedirs(os.path.join(root_path, 'SRFNet', 'dataset', 'preprocess_GAN'), exist_ok=True)
-=======
-
-import sys
-import ui.gui as ui
-
-
-# MyDiag 모듈 안의 Ui_MyDialog 클래스로부터 파생
-class XDialog(QDialog, ui.Ui_MyDialog):
-    def __init__(self):
-        QDialog.__init__(self)
-        # setupUi() 메서드는 화면에 다이얼로그 보여줌
-        self.setupUi(self)
-
-
-app = QApplication(sys.argv)
-dlg = XDialog()
-dlg.show()
-app.exec_()
->>>>>>> 34e7f038bc9585d8eead7b78254368e4f1472e81
+# root_dir = '/home/jhs/Desktop/SRFNet/LaneGCN/dataset/val/data/'
+#
+# from argoverse.map_representation.map_api import ArgoverseMap
+# from demo_usage.visualize_30hz_benchmark_data_on_map import DatasetOnMapVisualizer
+# am = ArgoverseMap()
+# from argoverse.data_loading.argoverse_forecasting_loader import ArgoverseForecastingLoader
+# afl = ArgoverseForecastingLoader(root_dir)
+# from argoverse.utils.mpl_plotting_utils import draw_lane_polygons
+#
+# import matplotlib.pyplot as plt
+# fig = plt.figure()
+# ax = fig.add_subplot(1,1,1)
+#
+# from argoverse.visualization.visualize_sequences import viz_sequence
+# seq_path = f"{root_dir}/2645.csv"
+# viz_sequence(afl.get(seq_path).seq_df, show=True)
+# xmin = 500
+# xmax = 700
+# ymin = 500
+# ymax = 700
+# city_name = 'MIA'
+# local_das = am.find_local_driveable_areas([xmin, xmax, ymin, ymax], city_name)
+#
+#
+# local_lane_polygons = am.find_local_lane_polygons([xmin, xmax, ymin, ymax], city_name)
+# local_das = am.find_local_driveable_areas([xmin, xmax, ymin, ymax], city_name)
+#
+# domv = DatasetOnMapVisualizer(dataset_dir, experiment_prefix, use_existing_files=use_existing_files, log_id=argoverse_data.current_log)
+#
+# draw_lane_polygons(ax, local_lane_polygons, color='r')

@@ -104,6 +104,9 @@ class Ui_Dialog(object):
         self.fde6.setGeometry(QtCore.QRect(780, 80, 41, 25))
         self.fde6.setAlignment(QtCore.Qt.AlignCenter)
         self.fde6.setObjectName("fde6")
+        self.pred_plot = matplotlibWidget(Dialog)
+        self.pred_plot.setGeometry(QtCore.QRect(20, 120, 1001, 721))
+        self.pred_plot.setObjectName("pred_plot")
 
         self.retranslateUi(Dialog)
         QtCore.QMetaObject.connectSlotsByName(Dialog)
@@ -123,6 +126,7 @@ class Ui_Dialog(object):
         self.fde1.setText(_translate("Dialog", "fde1"))
         self.ade6.setText(_translate("Dialog", "ade6"))
         self.fde6.setText(_translate("Dialog", "fde6"))
+from matplotlibwidgetFile import matplotlibWidget
 
 
 if __name__ == "__main__":
