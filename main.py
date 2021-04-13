@@ -15,9 +15,10 @@ import time
 from torch.utils.data import DataLoader
 import argoverse.evaluation.eval_forecasting as eval
 from argoverse.map_representation.map_api import ArgoverseMap
-from argoverse.utils.mpl_plotting_utils import draw_lane_polygons
+from argoverse.utils.mpl_plotting_utils import draw_lane_polygons, plot_nearby_centerlines
 am = ArgoverseMap()
 import random
+import csv
 
 class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
     def __init__(self):
@@ -29,6 +30,7 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         self.next_idx.clicked.connect(self.next)
         self.idx = 0
         self.fov = 25
+        self.data_dir = '/home/jhs/Desktop/SRFNet/LaneGCN/dataset/val/data/'
 
     def next(self):
         self.cur_data = next(iter(self.data_loader))
@@ -60,6 +62,25 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         city_name = self.cur_data['city'][0]
         local_lane_polygons = am.find_local_lane_polygons([xmin, xmax, ymin, ymax], city_name)
         draw_lane_polygons(self.pred_plot.canvas.ax, local_lane_polygons, color='k')
+
+        raw_data = []
+        with open(self.data_dir + self.cur_data['file_name'][0].name, newline='') as csvfile:
+            spamreader = csv.reader(csvfile, delimiter=' ', quotechar='|')
+            for row in spamreader:
+                raw_data.append(row)
+        raw_data = raw_data[1:]
+        time = np.asarray([float(raw_data[i][0].split(',')[0]) for i in range(len(raw_data))])
+        x = np.asarray([float(raw_data[i][0].split(',')[3]) for i in range(len(raw_data))])
+        y = np.asarray([float(raw_data[i][0].split(',')[4]) for i in range(len(raw_data))])
+        veh_class = [raw_data[i][0].split(',')[2] for i in range(len(raw_data))]
+        ego_index = [i for i,x in enumerate(veh_class) if x == 'AV']
+        ego_x = x[ego_index]
+        ego_y = y[ego_index]
+        target_index = [i for i,x in enumerate(veh_class) if x == 'AGENT']
+        target_x = x[target_index]
+        target_y = y[target_index]
+
+        self.pred_plot.canvas.ax.plot(ego_x, ego_y)
         self.pred_plot.canvas.draw()
         self.pred_plot.canvas.ax.axis('equal')
 
