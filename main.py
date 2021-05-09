@@ -16,10 +16,13 @@ from torch.utils.data import DataLoader
 import argoverse.evaluation.eval_forecasting as eval
 from argoverse.map_representation.map_api import ArgoverseMap
 from argoverse.utils.mpl_plotting_utils import draw_lane_polygons, plot_nearby_centerlines
+from importlib import import_module
 am = ArgoverseMap()
 import random
 import csv
+from mpi4py import MPI
 
+comm = MPI.COMM_WORLD
 class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
     def __init__(self):
         super(self.__class__, self).__init__()
@@ -45,7 +48,7 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         self.num_of_vehicles_data.setText(str(self.cur_data['feats'][0].shape[0]))
         self.SceneInfo_data.setText('None')
         self.idx_data.setText(str(self.cur_data['idx'][0]))
-        _, self.pred_out, _, _, _, _, _, _ = self.net(self.cur_data)
+        self.pred_out = self.net(self.cur_data)
         ade1, fde1, ade6, fde6 = self.get_eval_data(self.pred_out)
         self.ade1_data.setText(str(ade1)[:5])
         self.fde1_data.setText(str(fde1)[:5])
@@ -64,7 +67,7 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         draw_lane_polygons(self.pred_plot.canvas.ax, local_lane_polygons, color='k')
 
         raw_data = []
-        with open(self.data_dir + self.cur_data['file_name'][0].name, newline='') as csvfile:
+        with open(self.data_dir + self.cur_data['file_name'][0], newline='') as csvfile:
             spamreader = csv.reader(csvfile, delimiter=' ', quotechar='|')
             for row in spamreader:
                 raw_data.append(row)
@@ -80,37 +83,45 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         target_x = x[target_index]
         target_y = y[target_index]
 
-        self.pred_plot.canvas.ax.plot(ego_x, ego_y)
+        ego_aug = self.cur_data['ego_aug'][0]['traj']
+
+        for i in range(ego_aug.shape[0]):
+            aug_x = ego_aug[i,:,0]
+            aug_y = ego_aug[i,:,1]
+            self.pred_plot.canvas.ax.plot(aug_x, aug_y, '--', color='red')
+
+        self.pred_plot.canvas.ax.plot(ego_x, ego_y, '-', color='red')
+        self.pred_plot.canvas.ax.scatter(ego_x[-1], ego_y[-1], color='red')
+        self.pred_plot.canvas.ax.plot(target_x, target_y, '-', color='blue')
+        self.pred_plot.canvas.ax.scatter(target_x[-1], target_y[-1],color='blue')
         self.pred_plot.canvas.draw()
         self.pred_plot.canvas.ax.axis('equal')
 
     def get_eval_data(self, pred_out):
-        gt_trajectory = self.cur_data['gt_preds'][0][1, :, :]
-        forecasted_trajectory = []
-        score = []
-        ade = []
-        fde = []
-        for i in range(6):
-            score_pred = pred_out['cls'][0][0, i].cpu().detach().numpy()
-            pred_traj = pred_out['reg'][0][0, i, :, :].cpu().detach().numpy()
-            forecasted_trajectory.append(pred_traj)
-            score.append(score_pred)
-            ade.append(eval.get_ade(pred_traj, gt_trajectory))
-            fde.append(eval.get_fde(pred_traj, gt_trajectory))
-        conf_idx = np.where(score == max(score))[0][0]
-        ade1 = ade[conf_idx]
-        fde1 = fde[conf_idx]
-        ade6 = np.min(ade)
-        fde6 = np.min(fde)
+        metrics = dict()
+        loss_out = self.loss(pred_out, self.cur_data)
+        post_out = self.post_process(pred_out, self.cur_data)
+        self.post_process.append(metrics, loss_out, post_out)
+        dt = 0
+        metrics = sync(metrics)
+        cls = metrics["cls_loss"] / (metrics["num_cls"] + 1e-10)
+        reg = metrics["reg_loss"] / (metrics["num_reg"] + 1e-10)
+        loss = cls + reg
 
-        return ade1, fde1, ade6, fde6
+        preds = np.concatenate(metrics["preds"], 0)
+        gt_preds = np.concatenate(metrics["gt_preds"], 0)
+        has_preds = np.concatenate(metrics["has_preds"], 0)
+        ade1, fde1, ade, fde, min_idcs = pred_metrics(preds, gt_preds, has_preds)
+
+        return ade1, fde1, ade, fde
+
 
     def data_load(self):
         config = dict()
-        config['preprocess_val'] = os.path.join(self.root_dir, '../SRFNet/SRFNet/dataset/preprocess_GAN/val_crs_dist6_angle90.p')
+        config['preprocess_val'] = os.path.join(self.root_dir, '../SSL4autonomous_vehicle-prediction/LaneGCN/dataset/preprocess/val_crs_dist6_angle90_mod.p')
         config['preprocess'] = True
 
-        self.data = self.dataset(config, config, train=False)
+        self.data = self.Dataset(config, config, train=False)
         self.data_loader = DataLoader(self.data,
                                       batch_size=1,
                                       num_workers=1,
@@ -129,52 +140,56 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         root.withdraw()
 
         currdir = os.getcwd()
-        weight_file_dir = tkinter.filedialog.askopenfilename(parent=root, initialdir=os.path.join(currdir, '../SRFNet/SRFNet/results/'))
+        weight_file_dir = tkinter.filedialog.askopenfilename(parent=root, initialdir=os.path.join(currdir, '../SSL4autonomous_vehicle-prediction/results/'))
         weight_file = torch.load(weight_file_dir)
 
-        model_case = weight_file_dir[str.find(weight_file_dir, 'model') + 6:]
-        model_case = model_case[:str.find(model_case, '/')]
-
+        model_id = os.path.split((os.path.dirname(weight_file_dir)))[-1]
         sys.path.extend([os.path.join(os.path.dirname(weight_file_dir), 'files')])
 
-        spec = importlib.util.spec_from_file_location('get_model', os.path.join(os.path.dirname(weight_file_dir), 'files', 'model_' + model_case + '.py'))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = module
-        spec.loader.exec_module(module)
-
-        args = self.get_args()
-        _, dataset, collate_fn, net, _, _, _, _ = module.get_model(args)
-        pretrained_dict = weight_file['state_dict']
-        net.load_state_dict(pretrained_dict)
+        if model_id == 'SSL_baseline_end_to_end_supervised_learning':
+            model = import_module('SSL_baseline_train')
+            parser = model.parser
+            args = parser.parse_args()
+            config, config_enc, Dataset, collate_fn, net, loss, opt, post_process = model.model.get_model(args)
+            net.load_state_dict(weight_file['state_dict'])
+            self.args = args
+            self.Dataset = Dataset
+            self.net = net
+            self.collate_fn = collate_fn
+            self.post_process = post_process
+            self.loss = loss
 
         self.modelInfo.setText(weight_file_dir + ' is loaded successfully')
-        self.net = net
-        self.dataset = dataset
-        self.collate_fn = collate_fn
 
-    def get_args(self):
-        parser = argparse.ArgumentParser(description="Fuse Detection in Pytorch")
-        parser.add_argument(
-            "-m", "--model", default="model_lanegcn_GAN", type=str, metavar="MODEL", help="model name"
-        )
-        parser.add_argument("--eval", action="store_true")
-        parser.add_argument(
-            "--resume", default="", type=str, metavar="RESUME", help="checkpoint path"
-        )
-        parser.add_argument(
-            "--weight", default="", type=str, metavar="WEIGHT", help="checkpoint path"
-        )
-        parser.add_argument(
-            "--case", default="vanilla_gan", type=str
-        )
-        parser.add_argument(
-            "--transfer", default=['encoder'], type=list
-        )
-        parser.add_argument("--mode", default='client')
-        parser.add_argument("--port", default=52162)
+def sync(data):
+    data_list = comm.allgather(data)
+    data = dict()
+    for key in data_list[0]:
+        if isinstance(data_list[0][key], list):
+            data[key] = []
+        else:
+            data[key] = 0
+        for i in range(len(data_list)):
+            data[key] += data_list[i][key]
+    return data
 
-        return parser.parse_args()
+def pred_metrics(preds, gt_preds, has_preds):
+    # assert has_preds.all()
+    preds = np.asarray(preds, np.float32)
+    gt_preds = np.asarray(gt_preds, np.float32)
 
+    """batch_size x num_mods x num_preds"""
+    err = np.sqrt(((preds - np.expand_dims(gt_preds, 1)) ** 2).sum(3))
+
+    ade1 = err[:, 0].mean()
+    fde1 = err[:, 0, -1].mean()
+
+    min_idcs = err[:, :, -1].argmin(1)
+    row_idcs = np.arange(len(min_idcs)).astype(np.int64)
+    err = err[row_idcs, min_idcs]
+    ade = err.mean()
+    fde = err[:, -1].mean()
+    return ade1, fde1, ade, fde, min_idcs
 
 app = QApplication(sys.argv)
 main_dialog = MainDialog()
