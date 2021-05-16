@@ -78,7 +78,7 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
                 self.cand_toggles[i + 1].setChecked(True)
                 with torch.no_grad():
                     data_tmp = self.cur_data.copy()
-                    data_tmp['action'][0][0:1, 0, :, :] = data_tmp['action'][0][0:1, i, :, :]
+                    data_tmp['action'][0][0:1, 0, :, :] = data_tmp['action'][0][0:1, i+1, :, :]
                     self.pred_out.append(self.net(data_tmp))
             else:
                 self.cand_toggles[i+1].setEnabled(False)
@@ -195,31 +195,21 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
 
         model_id = os.path.split((os.path.dirname(weight_file_dir)))[-1]
         sys.path.extend([os.path.join(os.path.dirname(weight_file_dir), 'files')])
-        if model_id == 'SSL_baseline_end_to_end_supervised_learning':
-            model = import_module('SSL_baseline_train')
-            parser = model.parser
-            args = parser.parse_args()
-            config, config_enc, Dataset, collate_fn, net, loss, opt, post_process = model.model.get_model(args)
-            net.load_state_dict(weight_file['state_dict'])
-            self.args = args
-            self.Dataset = Dataset
-            self.net = net
-            self.collate_fn = collate_fn
-            self.post_process = post_process
-            self.loss = loss
+        if model_id == '3_ActionConditional_lanegcn_1mods_encoder_1':
+            model = import_module('3_ActionConditional_lanegcn_train')
 
-        if model_id == 'SSL_downstream_initialize_and_freeze_backbone_and_encoder':
-            model = import_module('SSL_downstream_train')
-            parser = model.parser
-            args = parser.parse_args()
-            config, config_enc, Dataset, collate_fn, net, loss, opt, post_process = model.model.get_model(args)
-            net.load_state_dict(weight_file['state_dict'])
-            self.args = args
-            self.Dataset = Dataset
-            self.net = net
-            self.collate_fn = collate_fn
-            self.post_process = post_process
-            self.loss = loss
+        elif model_id == '3_ActionConditional_lanegcn_6mods_encoder_1':
+            model = import_module('3_ActionConditional_lanegcn_train')
+        parser = model.parser
+        args = parser.parse_args()
+        config, Dataset, collate_fn, net, loss, post_process, opt = model.model.get_model(args)
+        net.load_state_dict(weight_file['state_dict'])
+        self.args = args
+        self.Dataset = Dataset
+        self.net = net
+        self.collate_fn = collate_fn
+        self.post_process = post_process
+        self.loss = loss
 
         self.modelInfo.setText(weight_file_dir + ' is loaded successfully')
 
