@@ -1,4 +1,3 @@
-
 from PyQt5.QtGui import *
 from PyQt5.QtCore import *
 from PyQt5.QtWidgets import *
@@ -17,12 +16,15 @@ import argoverse.evaluation.eval_forecasting as eval
 from argoverse.map_representation.map_api import ArgoverseMap
 from argoverse.utils.mpl_plotting_utils import draw_lane_polygons, plot_nearby_centerlines
 from importlib import import_module
+
 am = ArgoverseMap()
 import random
 import csv
 from mpi4py import MPI
 
 comm = MPI.COMM_WORLD
+
+
 class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
     def __init__(self):
         super(self.__class__, self).__init__()
@@ -40,6 +42,7 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         self.ego_path_aug_6.clicked.connect(self.visualization)
         self.ego_path_aug_7.clicked.connect(self.visualization)
         self.ego_path_aug_8.clicked.connect(self.visualization)
+        self.show_predict.clicked.connect(self.visualization)
 
         self.idx = 0
         self.fov = 25
@@ -57,7 +60,7 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
     def next(self):
         self.cur_data = next(iter(self.data_loader))
         target_traj = self.cur_data['gt_preds'][0][1]
-        while torch.norm(target_traj[0,:]-target_traj[-1,:]) < 2:
+        while torch.norm(target_traj[0, :] - target_traj[-1, :]) < 2:
             self.cur_data = next(iter(self.data_loader))
         self.update_data()
 
@@ -70,30 +73,51 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         self.ego_path_enable.setEnabled(True)
         self.ego_path_enable.setChecked(True)
         self.pred_out = []
+        self.show_predict.setChecked(True)
         with torch.no_grad():
             self.pred_out.append(self.net(self.cur_data))
         for i in range(8):
             if i < ego_aug.shape[0]:
-                self.cand_toggles[i+1].setEnabled(True)
+                self.cand_toggles[i + 1].setEnabled(True)
                 self.cand_toggles[i + 1].setChecked(True)
                 with torch.no_grad():
                     data_tmp = self.cur_data.copy()
-                    data_tmp['action'][0][0:1, 0, :, :] = data_tmp['action'][0][0:1, i+1, :, :]
+                    data_tmp['action'][0][0:1, 0, :, :] = data_tmp['action'][0][0:1, i + 1, :, :]
                     self.pred_out.append(self.net(data_tmp))
             else:
-                self.cand_toggles[i+1].setEnabled(False)
+                self.cand_toggles[i + 1].setEnabled(False)
                 self.cand_toggles[i + 1].setChecked(False)
 
         ade1, fde1, ade6, fde6 = self.get_eval_data(self.pred_out[0])
+        if '1_lanegcn' in self.model_id or '2_lanegcn_simple_head' in self.model_id:
+            for i in range(len(self.pred_out)):
+                self.pred_out[i]['reg'][0] = self.pred_out[i]['reg'][0][1:2]
+
         self.ade1_data.setText(str(ade1)[:5])
         self.fde1_data.setText(str(fde1)[:5])
         self.ade6_data.setText(str(ade6)[:5])
         self.fde6_data.setText(str(fde6)[:5])
+        self.update_table()
         self.visualization()
+
+    def update_table(self):
+        self.tableWidget.clear()
+        for i in range(4):
+            if i < len(self.pred_out):
+                pred_out = self.pred_out[i]
+                best_idx = np.argmax(pred_out['cls'][0][0].cpu().detach().numpy())
+                pred_reg = pred_out['reg'][0][0, best_idx, :, :]
+                x = pred_reg[:, 0].cpu()
+                y = pred_reg[:, 1].cpu()
+                for j in range(30):
+                    self.tableWidget.setItem(j, 2 * i, QTableWidgetItem(str(x[j].item())))
+                    self.tableWidget.setItem(j, 2 * i + 1, QTableWidgetItem(str(y[j].item())))
+
+
 
     def visualization(self):
         self.pred_plot.canvas.ax.clear()
-        ego_cur_pos = self.cur_data['gt_preds'][0][0,0,:]
+        ego_cur_pos = self.cur_data['gt_preds'][0][0, 0, :]
         xmin = ego_cur_pos[0] - self.fov
         xmax = ego_cur_pos[0] + self.fov
         ymin = ego_cur_pos[1] - self.fov
@@ -111,39 +135,52 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         x = np.asarray([float(raw_data[i][0].split(',')[3]) for i in range(len(raw_data))])
         y = np.asarray([float(raw_data[i][0].split(',')[4]) for i in range(len(raw_data))])
         veh_class = [raw_data[i][0].split(',')[2] for i in range(len(raw_data))]
-        ego_index = [i for i,x in enumerate(veh_class) if x == 'AV']
+        ego_index = [i for i, x in enumerate(veh_class) if x == 'AV']
         ego_x = x[ego_index]
         ego_y = y[ego_index]
         ego_hist_x = ego_x[:20]
         ego_hist_y = ego_y[:20]
         ego_fut_x = ego_x[19:]
         ego_fut_y = ego_y[19:]
-        target_index = [i for i,x in enumerate(veh_class) if x == 'AGENT']
+        target_index = [i for i, x in enumerate(veh_class) if x == 'AGENT']
         target_x = x[target_index]
         target_y = y[target_index]
+        target_hist_x = target_x[:20]
+        target_hist_y = target_y[:20]
+        target_fut_x = target_x[19:]
+        target_fut_y = target_y[19:]
         self.pred_plot.canvas.ax.plot(ego_hist_x, ego_hist_y, '-', color='red')
-        self.pred_plot.canvas.ax.plot(target_x, target_y, '-', color='blue')
+        self.pred_plot.canvas.ax.plot(target_hist_x, target_hist_y, '-', color='blue')
+        self.pred_plot.canvas.ax.scatter(target_hist_x[-1], target_hist_y[-1], color='blue')
 
         ego_aug = self.cur_data['ego_aug'][0]['traj'].numpy().copy()
-        ego_aug = np.concatenate([ego_aug, np.zeros_like(ego_aug[:,0:1,:])], axis=1)
+        ego_aug = np.concatenate([ego_aug, np.zeros_like(ego_aug[:, 0:1, :])], axis=1)
         for i in range(ego_aug.shape[0]):
-            ego_aug[i,:,:] = np.concatenate([np.expand_dims(np.asarray([ego_hist_x[-1], ego_hist_y[-1]]), axis=0), ego_aug[i,:30,:]], axis=0)
-            if self.cand_toggles[i+1].isChecked():
-                aug_x = ego_aug[i,:,0]
-                aug_y = ego_aug[i,:,1]
+            ego_aug[i, :, :] = np.concatenate([np.expand_dims(np.asarray([ego_hist_x[-1], ego_hist_y[-1]]), axis=0), ego_aug[i, :30, :]], axis=0)
+            if self.cand_toggles[i + 1].isChecked():
+                aug_x = ego_aug[i, :, 0]
+                aug_y = ego_aug[i, :, 1]
                 self.pred_plot.canvas.ax.plot(aug_x, aug_y, '--', color='red')
-                pred_out = self.pred_out[i+1]
+                self.pred_plot.canvas.ax.scatter(aug_x[-1], aug_y[-1], facecolors='none', edgecolors='red')
+
+                pred_out = self.pred_out[i + 1]
                 best_idx = np.argmax(pred_out['cls'][0][0].cpu().detach().numpy())
                 pred_reg = pred_out['reg'][0][0, best_idx, :, :]
-                self.pred_plot.canvas.ax.plot(pred_reg[:,0].cpu(), pred_reg[:,1].cpu(), '--', color='blue')
+                self.pred_plot.canvas.ax.plot(pred_reg[:, 0].cpu(), pred_reg[:, 1].cpu(), '--', color='blue')
+                self.pred_plot.canvas.ax.scatter(pred_reg[-1, 0].cpu(), pred_reg[-1, 1].cpu(), facecolors='none', edgecolors='blue')
+
         if self.ego_path_enable.isChecked():
-            self.pred_plot.canvas.ax.plot(ego_fut_x, ego_fut_y, '-', color='red')
-            self.pred_plot.canvas.ax.scatter(ego_x[-1], ego_y[-1], color='red')
+            self.pred_plot.canvas.ax.plot(ego_fut_x, ego_fut_y, '--', color='red')
+            self.pred_plot.canvas.ax.scatter(ego_x[-1], ego_y[-1], facecolors='none', edgecolors='red')
             pred_out = self.pred_out[0]
             best_idx = np.argmax(pred_out['cls'][0][0].cpu().detach().numpy())
             pred_reg = pred_out['reg'][0][0, best_idx, :, :]
             self.pred_plot.canvas.ax.plot(pred_reg[:, 0].cpu(), pred_reg[:, 1].cpu(), '--', color='blue')
-        self.pred_plot.canvas.ax.scatter(target_x[-1], target_y[-1],color='blue')
+            self.pred_plot.canvas.ax.scatter(pred_reg[-1, 0].cpu(), pred_reg[-1, 1].cpu(), facecolors='none', edgecolors='blue')
+
+        if self.show_predict.isChecked():
+            self.pred_plot.canvas.ax.plot(target_fut_x, target_fut_y, ':', color='black')
+            self.pred_plot.canvas.ax.scatter(target_fut_x[-1], target_fut_y[-1], color='black')
         self.pred_plot.canvas.draw()
         self.pred_plot.canvas.ax.axis('equal')
 
@@ -164,7 +201,6 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         ade1, fde1, ade, fde, min_idcs = pred_metrics(preds, gt_preds, has_preds)
 
         return ade1, fde1, ade, fde
-
 
     def data_load(self):
         config = dict()
@@ -193,16 +229,27 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         weight_file_dir = tkinter.filedialog.askopenfilename(parent=root, initialdir=os.path.join(currdir, '../SSL4autonomous_vehicle-prediction/results/'))
         weight_file = torch.load(weight_file_dir)
 
-        model_id = os.path.split((os.path.dirname(weight_file_dir)))[-1]
-        sys.path.extend([os.path.join(os.path.dirname(weight_file_dir), 'files')])
-        if model_id == '3_ActionConditional_lanegcn_1mods_encoder_1':
-            model = import_module('3_ActionConditional_lanegcn_train')
+        self.model_id = os.path.split((os.path.dirname(weight_file_dir)))[-1]
+        sys.path.insert(0, os.path.join(os.path.dirname(weight_file_dir), 'files'))
+        if '1_lanegcn' in self.model_id:
+            model = import_module('1_lanegcn_train')
+            parser = model.parser
+            args = parser.parse_args()
+            config, Dataset, collate_fn, net, loss, post_process, opt = model.model.get_model()
 
-        elif model_id == '3_ActionConditional_lanegcn_6mods_encoder_1':
+
+        elif '2_lanegcn_simple_head' in self.model_id:
+            model = import_module('2_lanegcn_simple_head_train')
+            parser = model.parser
+            args = parser.parse_args()
+            config, Dataset, collate_fn, net, loss, post_process, opt = model.model.get_model()
+
+        elif '3_ActionConditional_lanegcn' in self.model_id:
             model = import_module('3_ActionConditional_lanegcn_train')
-        parser = model.parser
-        args = parser.parse_args()
-        config, Dataset, collate_fn, net, loss, post_process, opt = model.model.get_model(args)
+            parser = model.parser
+            args = parser.parse_args()
+            config, Dataset, collate_fn, net, loss, post_process, opt = model.model.get_model(args)
+
         net.load_state_dict(weight_file['state_dict'])
         self.args = args
         self.Dataset = Dataset
@@ -212,6 +259,7 @@ class MainDialog(QMainWindow, _uiFiles.gui.Ui_Dialog):
         self.loss = loss
 
         self.modelInfo.setText(weight_file_dir + ' is loaded successfully')
+
 
 def sync(data):
     data_list = comm.allgather(data)
@@ -224,6 +272,7 @@ def sync(data):
         for i in range(len(data_list)):
             data[key] += data_list[i][key]
     return data
+
 
 def pred_metrics(preds, gt_preds, has_preds):
     # assert has_preds.all()
@@ -243,12 +292,11 @@ def pred_metrics(preds, gt_preds, has_preds):
     fde = err[:, -1].mean()
     return ade1, fde1, ade, fde, min_idcs
 
+
 app = QApplication(sys.argv)
 main_dialog = MainDialog()
 main_dialog.show()
 app.exec_()
-
-
 
 # root_dir = '/home/jhs/Desktop/SRFNet/LaneGCN/dataset/val/data/'
 #
@@ -275,4 +323,3 @@ app.exec_()
 # local_das = am.find_local_driveable_areas([xmin, xmax, ymin, ymax], city_name)
 #
 # domv = DatasetOnMapVisualizer(dataset_dir, experiment_prefix, use_existing_files=use_existing_files, log_id=argoverse_data.current_log)
-
